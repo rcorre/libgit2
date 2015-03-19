@@ -28,6 +28,9 @@ v0.22 + 1
   allow for specifying the expression from the user to be put into the
   reflog.
 
+* On Mac OS X, we now use SecureTransport to provide the cryptographic
+support for HTTPS connections insead of OpenSSL.
+
 ### API additions
 
 * The `git_merge_options` gained a `file_flags` member.
