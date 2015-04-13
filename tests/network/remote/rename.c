@@ -2,6 +2,7 @@
 #include "config/config_helpers.h"
 
 #include "repository.h"
+#include "filebuf.h"
 
 static git_repository *_repo;
 static const char *_remote_name = "test";
@@ -252,4 +253,54 @@ void test_network_remote_rename__symref_head(void)
 
 	cl_git_fail_with(GIT_ITEROVER, git_branch_next(&ref, &btype, iter));
 	git_branch_iterator_free(iter);
+}
+
+// validate a bug where git_remote_rename could duplicate a remote
+void test_network_remote_rename__does_not_duplicate_remote(void)
+{
+	git_buf      path_buf = GIT_BUF_INIT;
+	git_filebuf  cfg_file = GIT_FILEBUF_INIT;
+	git_strarray problems = {0};
+	const char  *cfg_path;
+
+	// this is what the config file would look like after:
+	//   - clone
+	//   - remove origin
+	//   - add origin
+	//   - fetch
+	//   - set master to track origin again
+	const char *config_text =
+		"[remote \"origin\"]\n" // empty section left after remove origin
+		"[branch \"master\"]\n"
+		"    remote = origin\n"
+		"    merge = refs/heads/master\n"
+		"[remote \"origin\"]\n" // section added after re-creating origin
+		"    url = https://github.com/libgit2/TestGitRepository\n"
+		"    fetch = +refs/heads/*:refs/remotes/origin/*\n";
+
+	// build path to config file
+	git_buf_puts(&path_buf, git_repository_path(_repo));
+	git_buf_puts(&path_buf, "config");
+	cfg_path = git_buf_cstr(&path_buf);
+
+	// write out config structure needed for test
+	cl_git_pass(git_filebuf_open(&cfg_file, cfg_path, 0, 0666));
+	cl_git_pass(git_filebuf_printf(&cfg_file, config_text));
+	cl_git_pass(git_filebuf_commit(&cfg_file));
+	git_buf_free(&path_buf);
+
+	// origin should exist before rename
+	assert_config_entry_existence(_repo, "remote.origin.fetch", true);
+	assert_config_entry_existence(_repo, "remote.origin.url"  , true);
+
+	// rename origin to origin2
+	cl_git_pass(git_remote_rename(&problems, _repo, "origin", "origin2"));
+
+	// origin2 should exist after rename
+	assert_config_entry_existence(_repo, "remote.origin2.fetch", true);
+	assert_config_entry_existence(_repo, "remote.origin2.url"  , true);
+
+	// origin should NOT exist after rename
+	assert_config_entry_existence(_repo, "remote.origin.fetch", false);
+	assert_config_entry_existence(_repo, "remote.origin.url"  , false);
 }
