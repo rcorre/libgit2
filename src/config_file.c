@@ -1453,12 +1453,15 @@ static int config_write(diskfile_backend *cfg, const char *key, const regex_t *p
 			 * don't loose that information, but we only need to
 			 * update post_start if we're going to use it in this
 			 * iteration.
+			 * If the section doesn't match and we are trying to delete an entry
+			 * (value == NULL), we must continue searching; there may be another
+			 * matching section later.
 			 */
 			if (!section_matches) {
-				if (!last_section_matched) {
+				if (!last_section_matched || value == NULL) {
 					reader_consume_line(reader);
 					continue;
-				}
+				} 
 			} else {
 				int has_matched = 0;
 				char *var_name, *var_value;
@@ -1543,22 +1546,17 @@ static int config_write(diskfile_backend *cfg, const char *key, const regex_t *p
 			if (reader->buffer.size > 0 && *(reader->buffer.ptr + reader->buffer.size - 1) != '\n')
 				git_filebuf_write(&file, "\n", 1);
 
-			/* And now if we just need to add a variable */
-			if (!section_matches && write_section(&file, section) < 0)
-				goto rewrite_fail;
+			/* If we were not deleting, write out the new variable, along with a
+			 * header if needed
+			 */
+			if (value != NULL) {
+				if (!section_matches && write_section(&file, section) < 0)
+					goto rewrite_fail;
 
-			/* Sanity check: if we are here, and value is NULL, that means that somebody
-			 * touched the config file after our initial read. We should probably assert()
-			 * this, but instead we'll handle it gracefully with an error. */
-			if (value == NULL) {
-				giterr_set(GITERR_CONFIG,
-					"race condition when writing a config file (a cvar has been removed)");
-				goto rewrite_fail;
+				/* If we are here, there is at least a section line */
+				q = quotes_for_value(value);
+				git_filebuf_printf(&file, "\t%s = %s%s%s\n", name, q, value, q);
 			}
-
-			/* If we are here, there is at least a section line */
-			q = quotes_for_value(value);
-			git_filebuf_printf(&file, "\t%s = %s%s%s\n", name, q, value, q);
 		}
 	}
 
